@@ -4,7 +4,7 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-use mail_parser::{MessageParser, PartType};
+use mail_parser::{MessageParser, MimeHeaders, PartType};
 
 /// Расширения, которые не должны проходить через почту никогда.
 const BLOCKED_EXT: [&str; 14] = [
@@ -94,7 +94,7 @@ fn main() -> ExitCode {
                 findings.push(format!("double-extension disguise: {name}"));
             }
         }
-        attachment_bytes += match att.contents() {
+        attachment_bytes += match &att.body {
             PartType::Binary(b) => b.len(),
             _ => 0,
         };

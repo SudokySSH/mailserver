@@ -84,10 +84,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: curl -sSfL https://raw.githubusercontent.com/zricethezav/gitleaks/master/scripts/install.sh | sh -s -- -b /usr/local/bin
+      - name: Gitleaks (полная история, секреты замаскированы)
+        run: gitleaks detect --source . --redact --verbose --exit-code 1
 
   test-panel:
     runs-on: ubuntu-latest

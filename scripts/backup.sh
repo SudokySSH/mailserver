@@ -59,9 +59,10 @@ create_backup() {
   sha=$(sha256sum "$out" | cut -d' ' -f1)
   echo "$sha  $(basename "$out")" > "${out}.sha256"
 
-  # ротация: оставляем 14 последних
-  ls -1t "$BACKUP_DIR"/aether-*.tar.gz.age 2>/dev/null | tail -n +15 | xargs -r rm -f
-  ls -1t "$BACKUP_DIR"/aether-*.sha256 2>/dev/null | tail -n +15 | xargs -r rm -f
+  # ротация: оставляем 14 последних (find вместо ls — корректно с любыми именами)
+  find "$BACKUP_DIR" -maxdepth 1 \( -name 'aether-*.tar.gz.age' -o -name 'aether-*.sha256' \) \
+    -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +15 | cut -d' ' -f2- \
+    | xargs -r rm -f
 
   echo "Готово: $out"
   echo "SHA256: $sha"
