@@ -51,7 +51,7 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 # ---------- конфиги ----------
-mkdir -p data/mail data/mail-state config certs panel nginx
+mkdir -p data/mail data/mail-state config certs edge/panel edge/nginx
 
 ADMIN_HASH=$(python3 - "$ADMIN_PASS" <<'EOF'
 import hashlib, os, sys
@@ -80,8 +80,8 @@ MAIL_DOMAIN=${MAIL_DOMAIN}
 PANEL_DOMAIN=${PANEL_DOMAIN}
 EOF
 
-sed "s/__MAIL_HOSTNAME__/${MAIL_HOSTNAME}/g" nginx/nginx.conf > nginx/nginx.conf.rendered
-mv nginx/nginx.conf.rendered nginx/nginx.conf
+sed "s/__MAIL_HOSTNAME__/${MAIL_HOSTNAME}/g" edge/nginx/nginx.conf > edge/nginx/nginx.conf.rendered
+mv edge/nginx/nginx.conf.rendered edge/nginx/nginx.conf
 
 # ---------- файрвол ----------
 ufw allow 22/tcp   >/dev/null

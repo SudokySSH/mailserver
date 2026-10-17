@@ -25,7 +25,7 @@ services:
       start_period: 60s
 
   panel:
-    build: ./panel
+    build: ./edge/panel
     container_name: mail-panel
     env_file: .env.panel
     environment:
@@ -45,7 +45,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./edge/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certs:/etc/letsencrypt:ro
     depends_on:
       - panel
