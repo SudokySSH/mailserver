@@ -1,4 +1,51 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: aether-db
+    env_file: .env.db
+    volumes:
+      - ./data/db:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aether -d aether"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: always
+
+  api:
+    build: ./services/api
+    container_name: aether-api
+    env_file: .env.api
+    environment:
+      DATABASE_URL: postgres://aether:${DB_PASSWORD}@db:5432/aether
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+
+  audit-worker:
+    build: ./services/audit-worker
+    container_name: aether-audit-worker
+    environment:
+      API_INTERNAL: http://api:8080
+      API_KEY: ${API_KEY}
+    depends_on:
+      - api
+    restart: always
+
+  frontend:
+    build: ./frontend
+    container_name: aether-frontend
+    environment:
+      API_INTERNAL: http://api:8080
+      API_KEY: ${API_KEY}
+    depends_on:
+      - api
+    restart: always
+
   mailserver:
     image: ghcr.io/docker-mailserver/docker-mailserver:latest
     container_name: mailserver
@@ -30,6 +77,8 @@ services:
     env_file: .env.panel
     environment:
       MAIL_HOST: mailserver
+      AUDIT_URL: http://api:8080
+      API_KEY: ${API_KEY}
     volumes:
       - ./config:/mail-config:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -39,7 +88,7 @@ services:
     restart: always
 
   nginx:
-    image: nginx:alpine
+    image: openresty/openresty:alpine
     container_name: mail-nginx
     ports:
       - "80:80"
@@ -48,5 +97,6 @@ services:
       - ./edge/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certs:/etc/letsencrypt:ro
     depends_on:
-      - panel
+      - frontend
+      - api
     restart: always

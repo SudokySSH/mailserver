@@ -2,11 +2,14 @@
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import re
 import smtplib
 import subprocess
+import threading
 import time
+import urllib.request
 from email.message import EmailMessage
 
 import uvicorn
@@ -19,6 +22,8 @@ MAIL_DOMAIN = os.environ["MAIL_DOMAIN"]
 PANEL_DOMAIN = os.environ["PANEL_DOMAIN"]
 MAIL_HOST = os.environ.get("MAIL_HOST", "mailserver")
 SECURE_COOKIE = os.environ.get("PANEL_SECURE_COOKIE", "true").lower() == "true"
+AUDIT_URL = os.environ.get("AUDIT_URL", "")
+AUDIT_KEY = os.environ.get("API_KEY", "")
 COOKIE = "aether_session"
 ITERATIONS = 200_000
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@" + re.escape(MAIL_DOMAIN) + r"$")
@@ -71,6 +76,25 @@ def check_csrf(request: Request, token: str) -> None:
 
 
 # ---------- docker-mailserver ----------
+
+def audit_event(etype: str, actor: str, detail: str = "", ip: str = "") -> None:
+    """Асинхронно отправить событие в Go-аудит. Не блокирует и не падает."""
+    if not AUDIT_URL or not AUDIT_KEY:
+        return
+
+    def _send() -> None:
+        try:
+            payload = json.dumps({"type": etype, "actor": actor,
+                                  "detail": detail[:1000], "ip": ip[:45]}).encode()
+            req = urllib.request.Request(
+                AUDIT_URL + "/v1/events", data=payload,
+                headers={"Content-Type": "application/json", "X-Api-Key": AUDIT_KEY})
+            urllib.request.urlopen(req, timeout=3)
+        except (OSError, ValueError) as e:  # аудит не должен ломать панель
+            print(f"audit event lost: {e}")
+
+    threading.Thread(target=_send, daemon=True).start()
+
 
 def run_setup(*args: str) -> tuple[bool, str]:
     cmd = ["docker", "exec", "mailserver", "setup", *args]
@@ -280,10 +304,12 @@ async def login(request: Request, password: str = Form(...)):
                               '<p><a class="back" href="/login">← Назад ко входу</a></p>')
     if check_password(password, ADMIN_HASH):
         _attempts.pop(ip, None)
+        audit_event("login.ok", "admin", ip=ip)
         resp = RedirectResponse("/", status_code=303)
         resp.set_cookie(COOKIE, session_token(), httponly=True, samesite="lax", secure=SECURE_COOKIE)
         return resp
     _register_fail(ip)
+    audit_event("login.fail", "unknown", ip=ip)
     await asyncio.sleep(0.7)  # замедляем перебор, не блокируя event loop
     return RedirectResponse("/login", status_code=303)
 
@@ -308,6 +334,8 @@ async def mailbox_create(request: Request, csrf: str = Form(...), local: str = F
         return page(request, '<div class="msg err">Пароль должен быть минимум 8 символов.</div>'
                               '<p><a class="back" href="/">← Назад</a></p>')
     ok, out = run_setup("email", "add", email, password)
+    if ok:
+        audit_event("mailbox.create", "admin", email)
     body = (f'<div class="msg ok">Ящик <b>{esc(email)}</b> создан. Пароль: <code>{esc(password)}</code> — '
             f'передай его владельцу и сохрани в надёжном месте.</div>'
             if ok else f'<div class="msg err">Ошибка: {esc(out)}</div>')
@@ -341,6 +369,8 @@ async def mailbox_delete(request: Request, csrf: str = Form(...), email: str = F
     ok, out = run_setup("email", "del", email)
     if not ok and "usage" in out.lower():
         ok, out = run_setup("email", "delete", email)
+    if ok:
+        audit_event("mailbox.delete", "admin", email)
     body = (f'<div class="msg ok">Ящик <b>{esc(email)}</b> удалён.</div>'
             if ok else f'<div class="msg err">Ошибка: {esc(out)}</div>')
     return page(request, body + '<p><a class="back" href="/">← К списку ящиков</a></p>')
@@ -387,8 +417,10 @@ async def send(request: Request, csrf: str = Form(...), from_email: str = Form(.
             smtp.starttls()
             smtp.login(from_email, password)
             smtp.send_message(msg)
+        audit_event("mail.send", from_email, f"to={to}")
         result = '<div class="msg ok">Письмо отправлено.</div>'
     except smtplib.SMTPException as e:
+        audit_event("mail.send_fail", from_email, f"to={to}")
         result = f'<div class="msg err">Ошибка SMTP: {esc(str(e))}</div>'
     except OSError as e:
         result = f'<div class="msg err">Сетевая ошибка: {esc(str(e))}</div>'

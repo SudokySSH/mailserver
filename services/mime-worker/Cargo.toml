@@ -1,0 +1,12 @@
+[package]
+name = "aether-mime-worker"
+version = "0.1.0"
+edition = "2021"
+description = "AETHER MAIL: безопасная предварительная обработка MIME и вложений"
+
+[dependencies]
+mail-parser = "0.9"
+
+[profile.release]
+opt-level = 2
+strip = true

@@ -51,7 +51,7 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 # ---------- конфиги ----------
-mkdir -p data/mail data/mail-state config certs edge/panel edge/nginx
+mkdir -p data/mail data/mail-state data/db config certs edge/panel edge/nginx
 
 ADMIN_HASH=$(python3 - "$ADMIN_PASS" <<'EOF'
 import hashlib, os, sys
@@ -60,6 +60,32 @@ dk = hashlib.pbkdf2_hmac("sha256", sys.argv[1].encode(), salt, 200_000)
 print(f"pbkdf2${salt.hex()}${dk.hex()}")
 EOF
 )
+
+API_KEY=$(openssl rand -hex 32)
+DB_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
+SESSION_SECRET=$(openssl rand -hex 32)
+
+# Переменные подстановки docker compose (${MAIL_DOMAIN} и т.д. берутся отсюда)
+cat > .env <<EOF
+MAIL_DOMAIN=${MAIL_DOMAIN}
+PANEL_DOMAIN=${PANEL_DOMAIN}
+API_KEY=${API_KEY}
+DB_PASSWORD=${DB_PASSWORD}
+EOF
+
+cat > .env.db <<EOF
+POSTGRES_USER=aether
+POSTGRES_DB=aether
+POSTGRES_PASSWORD=${DB_PASSWORD}
+EOF
+
+cat > .env.api <<EOF
+API_KEY=${API_KEY}
+PANEL_ADMIN_HASH=${ADMIN_HASH}
+PANEL_SESSION_SECRET=${SESSION_SECRET}
+MAIL_DOMAIN=${MAIL_DOMAIN}
+SECURE_COOKIE=true
+EOF
 
 cat > .env.mail <<EOF
 ENABLE_OPENDKIM=1
@@ -75,13 +101,16 @@ EOF
 
 cat > .env.panel <<EOF
 PANEL_ADMIN_HASH=${ADMIN_HASH}
-PANEL_SESSION_SECRET=$(openssl rand -hex 32)
+PANEL_SESSION_SECRET=${SESSION_SECRET}
 MAIL_DOMAIN=${MAIL_DOMAIN}
 PANEL_DOMAIN=${PANEL_DOMAIN}
 EOF
 
-sed "s/__MAIL_HOSTNAME__/${MAIL_HOSTNAME}/g" edge/nginx/nginx.conf > edge/nginx/nginx.conf.rendered
-mv edge/nginx/nginx.conf.rendered edge/nginx/nginx.conf
+# Рендерим nginx-конфиг из шаблона (исходник с плейсхолдером сохраняем)
+if [ ! -f edge/nginx/nginx.conf.template ]; then
+  cp edge/nginx/nginx.conf edge/nginx/nginx.conf.template
+fi
+sed "s/__MAIL_HOSTNAME__/${MAIL_HOSTNAME}/g" edge/nginx/nginx.conf.template > edge/nginx/nginx.conf
 
 # ---------- файрвол ----------
 ufw allow 22/tcp   >/dev/null
