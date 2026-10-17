@@ -81,7 +81,7 @@ fn main() -> ExitCode {
 
     for att in msg.attachments() {
         if let Some(name) = att.attachment_name() {
-            attachment_names.push(name.clone());
+            attachment_names.push(name.to_string());
             let lower = name.to_lowercase();
             for ext in BLOCKED_EXT {
                 if lower.ends_with(&format!(".{ext}")) {

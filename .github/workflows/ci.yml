@@ -26,7 +26,12 @@ jobs:
           ruff check edge/panel
 
       - name: Docker Compose config
-        run: docker compose -f docker-compose.yml config --quiet
+        run: |
+          # заглушки env-файлов для валидации конфигурации
+          for f in .env.db .env.api .env.mail .env.panel; do
+            [ -f "$f" ] || printf 'DUMMY=value\n' > "$f"
+          done
+          docker compose -f docker-compose.yml config --quiet
 
   go:
     runs-on: ubuntu-latest
@@ -87,7 +92,10 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install gitleaks
-        run: curl -sSfL https://raw.githubusercontent.com/zricethezav/gitleaks/master/scripts/install.sh | sh -s -- -b /usr/local/bin
+        run: |
+          VER=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep -m1 tag_name | cut -d '"' -f4)
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/${VER}/gitleaks_${VER#v}_linux_x64.tar.gz" -o /tmp/gl.tgz
+          tar -xzf /tmp/gl.tgz -C /tmp gitleaks && sudo mv /tmp/gitleaks /usr/local/bin/ && gitleaks version
       - name: Gitleaks (полная история, секреты замаскированы)
         run: gitleaks detect --source . --redact --verbose --exit-code 1
 
