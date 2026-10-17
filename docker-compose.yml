@@ -1,0 +1,52 @@
+services:
+  mailserver:
+    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    container_name: mailserver
+    hostname: mail.${MAIL_DOMAIN}
+    env_file: .env.mail
+    ports:
+      - "25:25"
+      - "465:465"
+      - "587:587"
+      - "2525:587"
+      - "2526:587"
+      - "2527:587"
+    volumes:
+      - ./data/mail:/var/mail
+      - ./data/mail-state:/var/mail-state
+      - ./config:/tmp/docker-mailserver
+      - ./certs:/etc/letsencrypt:ro
+    restart: always
+    stop_grace_period: 1m
+    healthcheck:
+      test: "ss -lnt | grep -q ':25 ' || exit 1"
+      interval: 30s
+      retries: 5
+      start_period: 60s
+
+  panel:
+    build: ./panel
+    container_name: mail-panel
+    env_file: .env.panel
+    environment:
+      MAIL_HOST: mailserver
+    volumes:
+      - ./config:/mail-config:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      mailserver:
+        condition: service_healthy
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    container_name: mail-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/letsencrypt:ro
+    depends_on:
+      - panel
+    restart: always

@@ -1,0 +1,12 @@
+# секреты и локальные данные — никогда не коммитить
+.env*
+certs/
+data/
+config/
+*.pem
+*.key
+
+# мусор
+__pycache__/
+*.pyc
+.DS_Store
