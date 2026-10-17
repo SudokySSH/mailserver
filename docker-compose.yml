@@ -79,6 +79,7 @@ services:
       MAIL_HOST: mailserver
       AUDIT_URL: http://api:8080
       API_KEY: ${API_KEY}
+      PANEL_PREFIX: /legacy
     volumes:
       - ./config:/mail-config:ro
       - /var/run/docker.sock:/var/run/docker.sock

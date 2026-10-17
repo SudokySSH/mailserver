@@ -156,6 +156,16 @@ func session(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no session"})
 }
 
+func logout(w http.ResponseWriter, r *http.Request) {
+	c := &http.Cookie{
+		Name: "aether_session", Value: "", Path: "/", MaxAge: -1,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureCookie,
+	}
+	http.SetCookie(w, c)
+	insertEvent("logout", "admin", "", clientIP(r))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // ---------- аудит ----------
 
 func addEvent(w http.ResponseWriter, r *http.Request) {
@@ -210,9 +220,13 @@ func listEvents(w http.ResponseWriter, r *http.Request) {
 	out := []event{}
 	for rows.Next() {
 		var e event
-		if err := rows.Scan(&e.ID, &e.Ts, &e.Type, &e.Actor, &e.Detail, &e.IP, &e.HMAC); err != nil {
+		var ts time.Time
+		if err := rows.Scan(&e.ID, &ts, &e.Type, &e.Actor, &e.Detail, &e.IP, &e.HMAC); err != nil {
 			continue
 		}
+		// Подпись считалась от канонического RFC3339 без долей секунд —
+		// приводим ts из БД к тому же виду, иначе верификация ложно сработает.
+		e.Ts = ts.UTC().Format(time.RFC3339)
 		canonical := strings.Join([]string{e.Ts, e.Type, e.Actor, e.Detail, e.IP}, "|")
 		e.Tampered = !hmac.Equal([]byte(sign([]byte(canonical))), []byte(e.HMAC))
 		out = append(out, e)
@@ -344,6 +358,7 @@ func main() {
 	mux.HandleFunc("/healthz", method(healthz, http.MethodGet))
 	mux.HandleFunc("/v1/login", method(login, http.MethodPost))
 	mux.HandleFunc("/v1/session", method(session, http.MethodGet))
+	mux.HandleFunc("/v1/logout", method(logout, http.MethodPost))
 	mux.HandleFunc("/v1/events", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

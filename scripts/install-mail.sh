@@ -152,6 +152,18 @@ for i in $(seq 1 30); do
 done
 sleep 10
 
+echo "=== Ожидание готовности Go API и PostgreSQL ==="
+for i in $(seq 1 45); do
+  if docker exec aether-api wget -qO- http://127.0.0.1:8080/healthz 2>/dev/null | grep -q '"status":"ok"'; then
+    echo "API готов"
+    break
+  fi
+  if [ "$i" = "45" ]; then
+    echo "Предупреждение: API не поднялся за 90 секунд, смотри: docker compose logs api"
+  fi
+  sleep 2
+done
+
 # ---------- DKIM ----------
 docker exec mailserver setup config dkim || echo "Предупреждение: DKIM не сгенерировался"
 
@@ -172,7 +184,9 @@ DKIM_TXT=$(cat "config/opendkim/keys/${MAIL_DOMAIN}/mail.txt" 2>/dev/null | tr -
 cat <<EOF
 
 ============================================================
-ГОТОВО! Панель управления: https://${PANEL_DOMAIN}
+ГОТОВО!
+  Новая панель (Next.js): https://${PANEL_DOMAIN}/dashboard
+  Старая панель (письма, DNS): https://${PANEL_DOMAIN}/legacy/
 
 Данные администратора:
   Пароль панели: ${ADMIN_PASS}

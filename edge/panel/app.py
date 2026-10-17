@@ -22,6 +22,7 @@ MAIL_DOMAIN = os.environ["MAIL_DOMAIN"]
 PANEL_DOMAIN = os.environ["PANEL_DOMAIN"]
 MAIL_HOST = os.environ.get("MAIL_HOST", "mailserver")
 SECURE_COOKIE = os.environ.get("PANEL_SECURE_COOKIE", "true").lower() == "true"
+P = os.environ.get("PANEL_PREFIX", "")  # префикс пути, если панель за прокси на подпути
 AUDIT_URL = os.environ.get("AUDIT_URL", "")
 AUDIT_KEY = os.environ.get("API_KEY", "")
 COOKIE = "aether_session"
@@ -175,11 +176,11 @@ def page(request: Request, content: str, active: str = "") -> HTMLResponse:
              ("send", "/send-form", "Отправить письмо", "M2 21l21-9L2 3v7l15 2-15 2v7z"),
              ("dns", "/dns", "DNS-записи", "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm7 9h-3a15 15 0 0 0-1.4-5.6A8 8 0 0 1 19 11zM12 4a13 13 0 0 1 2 7h-4a13 13 0 0 1 2-7zM5 11a8 8 0 0 1 4.4-5.6A15 15 0 0 0 8 11H5zm0 2h3a15 15 0 0 0 1.4 5.6A8 8 0 0 1 5 13zm7 7a13 13 0 0 1-2-7h4a13 13 0 0 1-2 7zm4.6-.4A15 15 0 0 0 16 13h3a8 8 0 0 1-2.4 6.6z")]
     nav = "".join(
-        f'<a href="{href}" class="{ "on" if key == active else "" }">'
+        f'<a href="{P}{href}" class="{ "on" if key == active else "" }">'
         f'<svg viewBox="0 0 24 24"><path d="{icon}"/></svg>{label}</a>'
         for key, href, label, icon in items
     ) if logged else ""
-    logout = '<a href="/logout" class="logout"><svg viewBox="0 0 24 24"><path d="M17 7l-1.4 1.4L18.2 11H8v2h10.2l-2.6 2.6L17 17l5-5-5-5zM4 5h8V3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8v-2H4V5z"/></svg>Выйти</a>' if logged else ""
+    logout = f'<a href="{P}/logout" class="logout"><svg viewBox="0 0 24 24"><path d="M17 7l-1.4 1.4L18.2 11H8v2h10.2l-2.6 2.6L17 17l5-5-5-5zM4 5h8V3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8v-2H4V5z"/></svg>Выйти</a>' if logged else ""
     html = f"""<!DOCTYPE html>
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -243,17 +244,17 @@ a.back {{ color:var(--accent); text-decoration:none; font-size:14px; }}
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     if not authed(request):
-        return RedirectResponse("/login")
+        return RedirectResponse(f"{P}/login")
     token = csrf_token()
     boxes = list_mailboxes()
     rows = "".join(
         f'<tr data-name="{esc(m.lower())}"><td style="font-weight:500">{esc(m)}</td><td>'
-        f'<form class="inline" method="post" action="/mailbox/password">'
+        f'<form class="inline" method="post" action="{P}/mailbox/password">'
         f'<input type="hidden" name="csrf" value="{token}">'
         f'<input type="hidden" name="email" value="{esc(m)}">'
         f'<input type="password" name="password" placeholder="Новый пароль" required minlength="8">'
         f'<button type="submit">Сменить</button></form>'
-        f'<form class="inline" method="post" action="/mailbox/delete" onsubmit="return confirm(\'Удалить ящик {esc(m)}?\')">'
+        f'<form class="inline" method="post" action="{P}/mailbox/delete" onsubmit="return confirm(\'Удалить ящик {esc(m)}?\')">'
         f'<input type="hidden" name="csrf" value="{token}">'
         f'<input type="hidden" name="email" value="{esc(m)}">'
         f'<button type="submit" class="danger">Удалить</button></form></td></tr>'
@@ -262,7 +263,7 @@ async def index(request: Request):
     body = f"""
 <h1>Ящики @{esc(MAIL_DOMAIN)}</h1>
 <div class="card"><h2>Создать ящик</h2>
-<form method="post" action="/mailbox/create">
+<form method="post" action="{P}/mailbox/create">
 <input type="hidden" name="csrf" value="{token}">
 <div class="grid">
 <input name="local" placeholder="Имя ящика (например: info)" required autocomplete="off">
@@ -286,11 +287,11 @@ function filterRows() {{
 @app.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request):
     if authed(request):
-        return RedirectResponse("/")
-    body = """
+        return RedirectResponse(f"{P}/")
+    body = f"""
 <h1>Вход в панель</h1>
 <div class="card" style="max-width:400px">
-<form method="post" action="/login">
+<form method="post" action="{P}/login">
 <input type="password" name="password" placeholder="Пароль администратора" required autofocus>
 <button type="submit" style="width:100%">Войти</button></form></div>"""
     return page(request, body)
@@ -301,22 +302,22 @@ async def login(request: Request, password: str = Form(...)):
     ip = request.client.host if request.client else "unknown"
     if _throttled(ip):
         return page(request, '<div class="msg err">Слишком много попыток. Подожди минуту и попробуй снова.</div>'
-                              '<p><a class="back" href="/login">← Назад ко входу</a></p>')
+                              f'<p><a class="back" href="{P}/login">← Назад ко входу</a></p>')
     if check_password(password, ADMIN_HASH):
         _attempts.pop(ip, None)
         audit_event("login.ok", "admin", ip=ip)
-        resp = RedirectResponse("/", status_code=303)
+        resp = RedirectResponse(f"{P}/", status_code=303)
         resp.set_cookie(COOKIE, session_token(), httponly=True, samesite="lax", secure=SECURE_COOKIE)
         return resp
     _register_fail(ip)
     audit_event("login.fail", "unknown", ip=ip)
     await asyncio.sleep(0.7)  # замедляем перебор, не блокируя event loop
-    return RedirectResponse("/login", status_code=303)
+    return RedirectResponse(f"{P}/login", status_code=303)
 
 
 @app.get("/logout")
 async def logout():
-    resp = RedirectResponse("/login", status_code=303)
+    resp = RedirectResponse(f"{P}/login", status_code=303)
     resp.delete_cookie(COOKIE)
     return resp
 
@@ -329,17 +330,17 @@ async def mailbox_create(request: Request, csrf: str = Form(...), local: str = F
     email = f"{local}@{MAIL_DOMAIN}"
     if not re.fullmatch(r"[a-z0-9._%+-]{1,64}", local):
         return page(request, '<div class="msg err">Некорректное имя ящика: только латиница, цифры и . _ % + -</div>'
-                              '<p><a class="back" href="/">← Назад</a></p>')
+                              f'<p><a class="back" href="{P}/">← Назад</a></p>')
     if len(password) < 8:
         return page(request, '<div class="msg err">Пароль должен быть минимум 8 символов.</div>'
-                              '<p><a class="back" href="/">← Назад</a></p>')
+                              f'<p><a class="back" href="{P}/">← Назад</a></p>')
     ok, out = run_setup("email", "add", email, password)
     if ok:
         audit_event("mailbox.create", "admin", email)
     body = (f'<div class="msg ok">Ящик <b>{esc(email)}</b> создан. Пароль: <code>{esc(password)}</code> — '
             f'передай его владельцу и сохрани в надёжном месте.</div>'
             if ok else f'<div class="msg err">Ошибка: {esc(out)}</div>')
-    return page(request, body + '<p><a class="back" href="/">← К списку ящиков</a></p>')
+    return page(request, body + f'<p><a class="back" href="{P}/">← К списку ящиков</a></p>')
 
 
 @app.post("/mailbox/password")
@@ -348,7 +349,7 @@ async def mailbox_password(request: Request, csrf: str = Form(...), email: str =
     check_csrf(request, csrf)
     if not EMAIL_RE.fullmatch(email) or len(password) < 8:
         return page(request, '<div class="msg err">Некорректные данные: пароль минимум 8 символов.</div>'
-                              '<p><a class="back" href="/">← Назад</a></p>')
+                              f'<p><a class="back" href="{P}/">← Назад</a></p>')
     ok, out = run_setup("email", "update", email, password)
     if not ok and ("unknown" in out.lower() or "not found" in out.lower() or "does not exist" in out.lower()):
         ok, out = run_setup("email", "add", email, password)
@@ -357,7 +358,7 @@ async def mailbox_password(request: Request, csrf: str = Form(...), email: str =
                 f'<code>{esc(password)}</code></div>')
     else:
         body = f'<div class="msg err">Ошибка: {esc(out)}</div>'
-    return page(request, body + '<p><a class="back" href="/">← К списку ящиков</a></p>')
+    return page(request, body + f'<p><a class="back" href="{P}/">← К списку ящиков</a></p>')
 
 
 @app.post("/mailbox/delete")
@@ -365,7 +366,7 @@ async def mailbox_delete(request: Request, csrf: str = Form(...), email: str = F
     require_auth(request)
     check_csrf(request, csrf)
     if not EMAIL_RE.fullmatch(email):
-        return page(request, '<div class="msg err">Некорректный адрес.</div><p><a class="back" href="/">← Назад</a></p>')
+        return page(request, f'<div class="msg err">Некорректный адрес.</div><p><a class="back" href="{P}/">← Назад</a></p>')
     ok, out = run_setup("email", "del", email)
     if not ok and "usage" in out.lower():
         ok, out = run_setup("email", "delete", email)
@@ -373,22 +374,22 @@ async def mailbox_delete(request: Request, csrf: str = Form(...), email: str = F
         audit_event("mailbox.delete", "admin", email)
     body = (f'<div class="msg ok">Ящик <b>{esc(email)}</b> удалён.</div>'
             if ok else f'<div class="msg err">Ошибка: {esc(out)}</div>')
-    return page(request, body + '<p><a class="back" href="/">← К списку ящиков</a></p>')
+    return page(request, body + f'<p><a class="back" href="{P}/">← К списку ящиков</a></p>')
 
 
 @app.get("/send-form", response_class=HTMLResponse)
 async def send_form(request: Request):
     if not authed(request):
-        return RedirectResponse("/login")
+        return RedirectResponse(f"{P}/login")
     token = csrf_token()
     boxes = list_mailboxes()
     if not boxes:
         return page(request, '<div class="msg err">Сначала создай хотя бы один ящик.</div>'
-                             '<p><a class="back" href="/">← К ящикам</a></p>', "send")
+                             f'<p><a class="back" href="{P}/">← К ящикам</a></p>', "send")
     options = "".join(f'<option value="{esc(m)}">{esc(m)}</option>' for m in boxes)
     body = f"""
 <h1>Новое письмо</h1>
-<div class="card"><form method="post" action="/send">
+<div class="card"><form method="post" action="{P}/send">
 <input type="hidden" name="csrf" value="{token}">
 <label>От кого</label><select name="from_email">{options}</select>
 <label>Пароль этого ящика</label><input type="password" name="password" required>
@@ -406,7 +407,7 @@ async def send(request: Request, csrf: str = Form(...), from_email: str = Form(.
     check_csrf(request, csrf)
     if not EMAIL_RE.fullmatch(from_email):
         return page(request, '<div class="msg err">Некорректный адрес отправителя.</div>'
-                              '<p><a class="back" href="/send-form">← Назад</a></p>')
+                              f'<p><a class="back" href="{P}/send-form">← Назад</a></p>')
     msg = EmailMessage()
     msg["From"] = from_email
     msg["To"] = to
@@ -424,13 +425,13 @@ async def send(request: Request, csrf: str = Form(...), from_email: str = Form(.
         result = f'<div class="msg err">Ошибка SMTP: {esc(str(e))}</div>'
     except OSError as e:
         result = f'<div class="msg err">Сетевая ошибка: {esc(str(e))}</div>'
-    return page(request, result + '<p><a class="back" href="/send-form">← Отправить ещё одно</a></p>', "send")
+    return page(request, result + f'<p><a class="back" href="{P}/send-form">← Отправить ещё одно</a></p>', "send")
 
 
 @app.get("/dns", response_class=HTMLResponse)
 async def dns(request: Request):
     if not authed(request):
-        return RedirectResponse("/login")
+        return RedirectResponse(f"{P}/login")
     dkim = dkim_record() or "DKIM ещё не сгенерирован — выполни на сервере: docker exec mailserver setup config dkim"
     body = f"""
 <h1>DNS-записи для {esc(MAIL_DOMAIN)}</h1>

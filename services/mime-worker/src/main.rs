@@ -96,7 +96,6 @@ fn main() -> ExitCode {
         }
         attachment_bytes += match att.contents() {
             PartType::Binary(b) => b.len(),
-            PartType::Text(t) => t.len(),
             _ => 0,
         };
     }

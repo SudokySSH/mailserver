@@ -39,9 +39,15 @@ create_backup() {
 
   echo "=== Создание бэкапа ${out} ==="
   mkdir -p "$TMP/aether"
-  for d in config certs data/mail-state; do
+  for d in config certs data/mail data/mail-state; do
     [ -e "$d" ] && cp -a "$d" "$TMP/aether/"
   done
+  # Дамп PostgreSQL (аудит, аккаунты, сессии)
+  if docker exec aether-db pg_dump -U aether -d aether --no-owner > "$TMP/aether/postgres.sql" 2>/dev/null; then
+    echo "postgres dump: ok ($(wc -l < "$TMP/aether/postgres.sql") строк)"
+  else
+    echo "postgres dump: пропущен (БД недоступна)"
+  fi
   docker exec mailserver setup email list > "$TMP/aether/mailboxes.txt" 2>/dev/null \
     || echo "(список ящиков недоступен — контейнер остановлен)" > "$TMP/aether/mailboxes.txt"
 
@@ -83,9 +89,16 @@ restore_backup() {
 
   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass file:"$(pass_file)" -in "$file" -out "$TMP/restore.tar.gz"
   tar -xzf "$TMP/restore.tar.gz" -C "$TMP"
-  for d in config certs data/mail-state; do
+  for d in config certs data/mail data/mail-state; do
     [ -e "$TMP/aether/$d" ] && rm -rf "./$d" && cp -a "$TMP/aether/$d" "./$d"
   done
+  if [ -s "$TMP/aether/postgres.sql" ]; then
+    docker compose up -d db
+    sleep 5
+    docker exec -i aether-db psql -U aether -d aether < "$TMP/aether/postgres.sql" >/dev/null \
+      && echo "PostgreSQL восстановлен из дампа" \
+      || echo "Предупреждение: не удалось восстановить PostgreSQL"
+  fi
   docker compose up -d
   docker restart mailserver
   echo "Восстановлено. Ящики восстановятся из mailboxes.txt вручную: docker exec mailserver setup email add <ящик> '<пароль>'"

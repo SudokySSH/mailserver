@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import MailboxManager from "./mailbox-manager";
+import LogoutButton from "./logout-button";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,7 @@ export default async function Dashboard() {
         <a href="/legacy/" className="logout">
           ⚙ Старая панель
         </a>
+        <LogoutButton />
       </aside>
 
       <main className="content">
