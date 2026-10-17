@@ -9,9 +9,9 @@ import subprocess
 import time
 from email.message import EmailMessage
 
+import uvicorn
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-import uvicorn
 
 ADMIN_HASH = os.environ["PANEL_ADMIN_HASH"]  # формат: pbkdf2$salt_hex$hash_hex
 SESSION_SECRET = os.environ.get("PANEL_SESSION_SECRET", ADMIN_HASH)
@@ -75,7 +75,7 @@ def check_csrf(request: Request, token: str) -> None:
 def run_setup(*args: str) -> tuple[bool, str]:
     cmd = ["docker", "exec", "mailserver", "setup", *args]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
         return r.returncode == 0, (r.stdout + r.stderr).strip()
     except subprocess.TimeoutExpired:
         return False, "Команда не ответила за 60 секунд"
@@ -99,7 +99,8 @@ def dkim_record() -> str:
     """Устойчивый парсер bind-формата opendkim (склейка строк и кавычек)."""
     path = f"/mail-config/opendkim/keys/{MAIL_DOMAIN}/mail.txt"
     try:
-        raw = open(path, encoding="utf-8").read()
+        with open(path, encoding="utf-8") as f:
+            raw = f.read()
     except OSError:
         return ""
     body = re.sub(r"\([^)]*\)", "", raw)          # strip comments
@@ -146,7 +147,6 @@ def esc(s: str) -> str:
 
 def page(request: Request, content: str, active: str = "") -> HTMLResponse:
     logged = authed(request)
-    token = csrf_token()
     items = [("boxes", "/", "Ящики", "M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z"),
              ("send", "/send-form", "Отправить письмо", "M2 21l21-9L2 3v7l15 2-15 2v7z"),
              ("dns", "/dns", "DNS-записи", "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm7 9h-3a15 15 0 0 0-1.4-5.6A8 8 0 0 1 19 11zM12 4a13 13 0 0 1 2 7h-4a13 13 0 0 1 2-7zM5 11a8 8 0 0 1 4.4-5.6A15 15 0 0 0 8 11H5zm0 2h3a15 15 0 0 0 1.4 5.6A8 8 0 0 1 5 13zm7 7a13 13 0 0 1-2-7h4a13 13 0 0 1-2 7zm4.6-.4A15 15 0 0 0 16 13h3a8 8 0 0 1-2.4 6.6z")]

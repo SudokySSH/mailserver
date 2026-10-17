@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck (install + backup)
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: "./scripts"
+
+      - name: Bash syntax check
+        run: for f in scripts/*.sh; do bash -n "$f"; done
+
+      - name: Python compile + Ruff
+        run: |
+          python -m py_compile edge/panel/app.py
+          pip install ruff
+          ruff check edge/panel
+
+      - name: Docker Compose config
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test-panel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: pip install fastapi uvicorn python-multipart httpx2 pytest
+      - name: Smoke tests (import + routing без Docker)
+        run: |
+          cd edge/panel
+          python - <<'EOF'
+          import os
+          os.environ.update(
+              PANEL_ADMIN_HASH="pbkdf2$00ff11$" + "ab"*32,
+              PANEL_SESSION_SECRET="test-secret",
+              MAIL_DOMAIN="example.com",
+              PANEL_DOMAIN="panel.example.com",
+              PANEL_SECURE_COOKIE="false",
+          )
+          import app as m
+          from fastapi.testclient import TestClient
+
+          m.run_setup = lambda *a: (True, "")
+          m.list_mailboxes = lambda: ["admin@example.com"]
+          m.dkim_record = lambda: "v=DKIM1; k=rsa; p=TEST"
+          c = TestClient(m.app)
+
+          assert c.get("/login").status_code == 200
+          r = c.get("/", follow_redirects=False)
+          assert r.status_code == 307 or r.headers.get("location") == "/login"
+          bad = c.post("/login", data={"password": "wrong"}, follow_redirects=False)
+          assert bad.status_code == 303
+
+          # сессия: рендер списка с подписанной cookie
+          r = c.get("/", cookies={"aether_session": m.session_token()})
+          assert r.status_code == 200 and "admin@example.com" in r.text
+          r = c.get("/dns", cookies={"aether_session": m.session_token()})
+          assert "v=DKIM1" in r.text
+          r = c.get("/send-form", cookies={"aether_session": m.session_token()})
+          assert r.status_code == 200
+
+          # CSRF: POST без токена → 403, с верным → 200
+          r = c.post("/mailbox/create",
+                     cookies={"aether_session": m.session_token()},
+                     data={"local": "x", "password": "12345678", "csrf": "bad"})
+          assert r.status_code == 403, r.status_code
+          r = c.post("/mailbox/create",
+                     cookies={"aether_session": m.session_token()},
+                     data={"local": "x", "password": "12345678", "csrf": m.csrf_token()})
+          assert r.status_code == 200, r.status_code
+
+          # реальный логин выдаёт подписанную cookie
+          m.ADMIN_HASH = m.hash_password("super-secret-1")
+          ok = c.post("/login", data={"password": "super-secret-1"}, follow_redirects=False)
+          assert ok.status_code == 303 and "aether_session" in ok.headers.get("set-cookie", "")
+
+          # брутфорс: 5 неудачных → 6-я заблокирована
+          m.ADMIN_HASH = m.hash_password("other-pass-123")
+          for _ in range(5):
+              c.post("/login", data={"password": "nope1234"}, follow_redirects=False)
+          r = c.post("/login", data={"password": "nope1234"}, follow_redirects=False)
+          assert "Слишком много попыток" in r.text
+
+          # XSS-экранирование
+          assert m.esc('<script>"&') == "&lt;script&gt;&quot;&amp;"
+          print("SMOKE TESTS OK")
+          EOF
